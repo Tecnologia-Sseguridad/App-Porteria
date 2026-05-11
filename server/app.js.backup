@@ -1,0 +1,176 @@
+const express = require('express');
+const cors = require('cors');
+const mrzScanner = require('mrz-scan');
+const multer = require('multer');
+const path = require('path');
+
+const app = express();
+const PORT = 3001;
+
+app.use(cors());
+app.use(express.json());
+
+const upload = multer({ 
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }
+});
+
+function formatMRZResult(result) {
+  if (!result || !result.fields) return null;
+  
+  const fields = result.fields;
+  const rut = fields.optional2 
+    ? fields.optional2.replace(' ', '-') 
+    : '';
+  const sexo = fields.sex === 'male' ? 'M' : 'F';
+  
+  let primerNombre = fields.firstName || '';
+  if (primerNombre.includes(' ')) {
+    primerNombre = primerNombre.split(' ')[0];
+  }
+  
+  return {
+    format: result.format,
+    valid: result.valid,
+    data: {
+      nombres: primerNombre,
+      apellidos: fields.lastName || '',
+      rut: rut,
+      numero_carnet: fields.documentNumber || '',
+      sexo: sexo,
+      nacionalidad: fields.nationality || '',
+      destino: '',
+      patente: null,
+      comentarios: null,
+      fecha_nacimiento: fields.birthDate || '',
+      fecha_expiracion: fields.expirationDate || '',
+      pais_emisor: fields.issuingState || '',
+      tipo_documento: fields.documentCode || ''
+    }
+  };
+}
+
+app.post('/api/scan', upload.single('image'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'No se encontró imagen' 
+      });
+    }
+
+    const imageBuffer = req.file.buffer;
+    const result = await mrzScanner(imageBuffer, { original: true });
+    
+    if (!result) {
+      return res.json({ 
+        success: false, 
+        error: 'No se detectó MRZ en la imagen',
+        data: null
+      });
+    }
+
+    const formattedResult = formatMRZResult(result);
+    
+    res.json({
+      success: true,
+      data: formattedResult.data,
+      meta: {
+        format: formattedResult.format,
+        valid: formattedResult.valid
+      }
+    });
+
+  } catch (error) {
+    console.error('Error processing image:', error.message);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Error al procesar la imagen',
+      details: error.message
+    });
+  }
+});
+
+app.post('/api/login', (req, res) => {
+  const { email, password } = req.body;
+  
+  if (!email || !password) {
+    return res.status(400).json({ 
+      success: false, 
+      error: 'Email y contraseña requeridos' 
+    });
+  }
+  
+  setTimeout(() => {
+    if (email === 'demo@test.com' && password === '123456') {
+      res.json({
+        success: true,
+        user: {
+          id: 1,
+          name: 'Usuario Demo',
+          email: email,
+          token: 'demo_token_123456'
+        }
+      });
+    } else {
+      res.json({
+        success: false,
+        error: 'Credenciales inválidas'
+      });
+    }
+  }, 1000);
+});
+
+app.get('/api/scans/:userId', (req, res) => {
+  const mockScans = [
+    {
+      id: 1,
+      nombres: 'FELIPE ANTO',
+      apellidos: 'VALENZUELA CUEVAS',
+      rut: '20690939-0',
+      numero_carnet: '535264638',
+      sexo: 'M',
+      nacionalidad: 'CHL',
+      fecha_scan: new Date().toISOString(),
+      thumbnail: null
+    },
+    {
+      id: 2,
+      nombres: 'MARIA JOSEFINA',
+      apellidos: 'GOMEZ SILVA',
+      rut: '15234567-8',
+      numero_carnet: '123456789',
+      sexo: 'F',
+      nacionalidad: 'CHL',
+      fecha_scan: new Date(Date.now() - 86400000).toISOString(),
+      thumbnail: null
+    },
+    {
+      id: 3,
+      nombres: 'PEDRO PABLO',
+      apellidos: 'RODRIGUEZ MARTINEZ',
+      rut: '9876543-2',
+      numero_carnet: '987654321',
+      sexo: 'M',
+      nacionalidad: 'CHL',
+      fecha_scan: new Date(Date.now() - 172800000).toISOString(),
+      thumbnail: null
+    }
+  ];
+  
+  res.json({
+    success: true,
+    scans: mockScans
+  });
+});
+
+app.listen(PORT, () => {
+  console.log(`========================================`);
+  console.log(`  🚀 MRZ API Server`);
+  console.log(`  📍 http://localhost:${PORT}`);
+  console.log(`========================================`);
+  console.log(`  POST /api/scan     - Escanear carnet`);
+  console.log(`  POST /api/login    - Login usuario`);
+  console.log(`  GET  /api/scans/:id - Ver escaneos`);
+  console.log(`========================================`);
+});

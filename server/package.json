@@ -1,0 +1,17 @@
+{
+  "name": "mrz-api-server",
+  "version": "1.0.0",
+  "description": "API REST para escaneo de carnets MRZ",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "node app.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "mrz-scan": "^1.2.0",
+    "multer": "^1.4.5-lts.1",
+    "pg": "^8.20.0"
+  }
+}

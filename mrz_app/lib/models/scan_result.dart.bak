@@ -1,0 +1,109 @@
+class ScanResult {
+  final int? id;
+  final String nombres;
+  final String apellidos;
+  final String rut;
+  final String numeroCarnet;
+  final String sexo;
+  final String nacionalidad;
+  final String destino;
+  final String? patente;
+  final String? comentarios;
+  final String? fechaNacimiento;
+  final String? fechaExpiracion;
+  final DateTime fechaScan;
+  final String? horaEntrada;
+  final bool isSynced;
+
+  ScanResult({
+    this.id,
+    required this.nombres,
+    required this.apellidos,
+    required this.rut,
+    required this.numeroCarnet,
+    required this.sexo,
+    required this.nacionalidad,
+    required this.destino,
+    this.patente,
+    this.comentarios,
+    this.fechaNacimiento,
+    this.fechaExpiracion,
+    DateTime? fechaScan,
+    this.horaEntrada,
+    this.isSynced = false,
+  }) : fechaScan = fechaScan ?? DateTime.now();
+
+  factory ScanResult.fromJson(Map<String, dynamic> json) {
+    return ScanResult(
+      id: json['id'],
+      nombres: json['nombres'] ?? '',
+      apellidos: json['apellidos'] ?? '',
+      rut: json['rut'] ?? '',
+      numeroCarnet: json['numero_carnet'] ?? '',
+      sexo: json['sexo'] ?? '',
+      nacionalidad: json['nacionalidad'] ?? '',
+      destino: json['destino'] ?? '',
+      patente: json['patente'],
+      comentarios: json['comentarios'],
+      fechaNacimiento: json['fecha_nacimiento'],
+      fechaExpiracion: json['fecha_expiracion'],
+      fechaScan: json['fecha_scan'] != null 
+          ? DateTime.parse(json['fecha_scan']) 
+          : DateTime.now(),
+      isSynced: json['is_synced'] ?? false,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'nombres': nombres,
+      'apellidos': apellidos,
+      'rut': rut,
+      'numero_carnet': numeroCarnet,
+      'sexo': sexo,
+      'nacionalidad': nacionalidad,
+      'destino': destino,
+      'patente': patente,
+      'comentarios': comentarios,
+      'fecha_nacimiento': fechaNacimiento,
+      'fecha_expiracion': fechaExpiracion,
+      'fecha_scan': fechaScan.toIso8601String(),
+      'is_synced': isSynced,
+    };
+  }
+
+  ScanResult copyWith({
+    int? id,
+    String? nombres,
+    String? apellidos,
+    String? rut,
+    String? numeroCarnet,
+    String? sexo,
+    String? nacionalidad,
+    String? destino,
+    String? patente,
+    String? comentarios,
+    String? fechaNacimiento,
+    String? fechaExpiracion,
+    DateTime? fechaScan,
+    bool? isSynced,
+  }) {
+    return ScanResult(
+      id: id ?? this.id,
+      nombres: nombres ?? this.nombres,
+      apellidos: apellidos ?? this.apellidos,
+      rut: rut ?? this.rut,
+      numeroCarnet: numeroCarnet ?? this.numeroCarnet,
+      sexo: sexo ?? this.sexo,
+      nacionalidad: nacionalidad ?? this.nacionalidad,
+      destino: destino ?? this.destino,
+      patente: patente ?? this.patente,
+      comentarios: comentarios ?? this.comentarios,
+      fechaNacimiento: fechaNacimiento ?? this.fechaNacimiento,
+      fechaExpiracion: fechaExpiracion ?? this.fechaExpiracion,
+      fechaScan: fechaScan ?? this.fechaScan,
+      isSynced: isSynced ?? this.isSynced,
+    );
+  }
+}
