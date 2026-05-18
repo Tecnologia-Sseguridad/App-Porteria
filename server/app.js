@@ -4,9 +4,13 @@ const mrzScanner = require('mrz-scan');
 const multer = require('multer');
 const path = require('path');
 const { Pool } = require('pg');
+const jwt = require('jsonwebtoken');
 
 const app = express();
 const PORT = 3001;
+
+const MAIN_API = 'https://control.sseguridad.cl';
+const MAIN_API_TOKEN = 'pbkdf2_sha256'; // Placeholder - el app.js usará el token del usuario para validar
 
 const pool = new Pool({
   user: 'postgres',
@@ -19,10 +23,50 @@ const pool = new Pool({
 app.use(cors());
 app.use(express.json());
 
-const upload = multer({ 
+const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 }
 });
+
+function getTokenFromHeader(req) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return null;
+  if (authHeader.startsWith('Bearer ')) {
+    return authHeader.substring(7);
+  }
+  return null;
+}
+
+async function validarTokenConBackend(token) {
+  try {
+    const response = await fetch(`${MAIN_API}/verificar-acceso`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    return response.status === 200;
+  } catch (e) {
+    console.log('[AUTH] No se pudo validar con backend:', e.message);
+    return null; // null = no se pudo verificar, permitir por ahora
+  }
+}
+
+function middlewareValidarToken(req, res, next) {
+  const token = getTokenFromHeader(req);
+  
+  if (!token) {
+    return res.status(401).json({
+      success: false,
+      error: 'Token requerido',
+      session_expired: true
+    });
+  }
+
+  req.userToken = token;
+  next();
+}
 
 function limpiarRut(rut) {
   if (!rut) return '';
@@ -64,8 +108,22 @@ function formatMRZResult(result) {
   };
 }
 
-app.post('/api/scan', upload.single('image'), async (req, res) => {
+app.post('/api/scan', middlewareValidarToken, upload.single('image'), async (req, res) => {
   console.log('\n[API] === ESCANEO MRZ ===');
+  console.log('[API] Token presente:', req.userToken ? 'SI' : 'NO');
+
+  // Validar token con backend principal
+  const tokenValido = await validarTokenConBackend(req.userToken);
+  if (tokenValido === false) {
+    console.log('[API] ERROR: Token expirado o inválido');
+    return res.status(401).json({
+      success: false,
+      error: 'Sesión expirada',
+      session_expired: true
+    });
+  }
+
+  console.log('[API] Token validado (o no se pudo verificar, permitiendo)');
   console.log('[API] Imagen recibida:', req.file ? req.file.originalname : 'NO');
   
   try {
@@ -118,9 +176,20 @@ app.post('/api/scan', upload.single('image'), async (req, res) => {
   }
 });
 
-app.post('/api/check-blacklist', async (req, res) => {
+app.post('/api/check-blacklist', middlewareValidarToken, async (req, res) => {
   const { rut, usuario_id } = req.body;
-  
+
+  // Validar token con backend principal
+  const tokenValido = await validarTokenConBackend(req.userToken);
+  if (tokenValido === false) {
+    console.log('[API] BLACKLIST - Token expirado');
+    return res.status(401).json({
+      is_blacklist: false,
+      session_expired: true,
+      message: 'Sesión expirada'
+    });
+  }
+
   console.log('\n[API] === VERIFICAR BLACKLIST ===');
   console.log('[API] RUT:', rut);
   console.log('[API] Usuario ID:', usuario_id);
@@ -196,34 +265,46 @@ app.post('/api/check-blacklist', async (req, res) => {
   }
 });
 
-app.post('/api/login', (req, res) => {
+app.post('/api/login', async (req, res) => {
   const { email, password } = req.body;
-  
+
   if (!email || !password) {
-    return res.status(400).json({ 
-      success: false, 
-      error: 'Email y contraseña requeridos' 
+    return res.status(400).json({
+      success: false,
+      error: 'Email y contraseña requeridos'
     });
   }
-  
-  setTimeout(() => {
-    if (email === 'demo@test.com' && password === '123456') {
-      res.json({
+
+  // Proxy login al backend principal
+  try {
+    const response = await fetch(`${MAIN_API}/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    });
+
+    const data = await response.json();
+
+    if (response.status === 200 && data.status === 'success') {
+      return res.json({
         success: true,
-        user: {
-          id: 1,
-          name: 'Usuario Demo',
-          email: email,
-          token: 'demo_token_123456'
-        }
+        access_token: data.access_token,
+        session_crypto_key: data.session_crypto_key,
+        user: data.user
       });
     } else {
-      res.json({
+      return res.status(401).json({
         success: false,
-        error: 'Credenciales inválidas'
+        error: data.detail || 'Credenciales inválidas'
       });
     }
-  }, 1000);
+  } catch (e) {
+    console.log('[API] Login error:', e.message);
+    return res.status(500).json({
+      success: false,
+      error: 'Error de conexión'
+    });
+  }
 });
 
 app.get('/api/scans/:userId', (req, res) => {

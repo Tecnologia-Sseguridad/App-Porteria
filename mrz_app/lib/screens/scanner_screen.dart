@@ -6,6 +6,8 @@ import 'package:image_picker/image_picker.dart';
 import '../models/scan_result.dart';
 import '../services/api_service.dart';
 import '../widgets/result_modal.dart';
+import '../widgets/session_expired_dialog.dart';
+import 'login_screen.dart';
 
 class ScannerScreen extends StatefulWidget {
   const ScannerScreen({super.key});
@@ -31,14 +33,29 @@ class _ScannerScreenState extends State<ScannerScreen>
       vsync: this,
     )..repeat(reverse: true);
 
+    _setupSessionListener();
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _pickImage();
     });
   }
 
+  void _setupSessionListener() {
+    final apiService = ApiService();
+    apiService.onSessionExpired = () {
+      if (mounted) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (context) => const LoginScreen()),
+          (route) => false,
+        );
+      }
+    };
+  }
+
   @override
   void dispose() {
     _pulseController.dispose();
+    ApiService().onSessionExpired = null;
     super.dispose();
   }
 
@@ -67,6 +84,17 @@ class _ScannerScreenState extends State<ScannerScreen>
   Future<void> _processImage() async {
     if (_selectedImage == null) return;
 
+    final apiService = ApiService();
+
+    // VALIDAR SESIÓN ANTES DE ESCANEAR
+    final sesionValida = await apiService.checkSessionBeforeOperation();
+    if (!sesionValida) {
+      if (mounted) {
+        showSessionExpiredDialog(context);
+      }
+      return;
+    }
+
     setState(() {
       _isProcessing = true;
       _isAnalyzing = true;
@@ -83,10 +111,15 @@ class _ScannerScreenState extends State<ScannerScreen>
       });
     });
 
-    final apiService = ApiService();
     final result = await apiService.scanMRZ(_selectedImage!);
 
     if (!mounted) return;
+
+    if (result['session_expired'] == true) {
+      setState(() => _isProcessing = false);
+      showSessionExpiredDialog(context);
+      return;
+    }
 
     setState(() {
       _isAnalyzing = false;
@@ -116,6 +149,12 @@ class _ScannerScreenState extends State<ScannerScreen>
       );
 
       if (!mounted) return;
+
+      if (blacklistCheck['session_expired'] == true) {
+        setState(() => _isProcessing = false);
+        showSessionExpiredDialog(context);
+        return;
+      }
 
       setState(() => _isProcessing = false);
 
@@ -198,6 +237,13 @@ class _ScannerScreenState extends State<ScannerScreen>
     );
 
     if (!mounted) return;
+
+    if (response['session_expired'] == true) {
+      setState(() => _isProcessing = false);
+      showSessionExpiredDialog(context);
+      return;
+    }
+
     setState(() => _isProcessing = false);
 
     if (response['success'] == true) {

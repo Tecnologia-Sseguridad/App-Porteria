@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import '../models/scan_result.dart';
 import '../models/user.dart';
 import '../services/api_service.dart';
+import '../widgets/session_expired_dialog.dart';
 import 'scanner_screen.dart';
 import 'login_screen.dart';
 import 'visita_detalle_screen.dart';
@@ -29,25 +30,92 @@ class _HomeScreenState extends State<HomeScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _setupSessionListener();
+    _initAndValidateSession();
+  }
+
+  Future<void> _initAndValidateSession() async {
+    await _apiService.restoreSession();
+    
+    if (_apiService.session == null) {
+      if (mounted) {
+        showSessionExpiredDialog(context);
+      }
+      return;
+    }
+
+    final isValid = await _apiService.validateSession();
+    if (!isValid && _apiService.session == null) {
+      if (mounted) {
+        showSessionExpiredDialog(context);
+      }
+      return;
+    }
+
     _loadScans();
+  }
+
+  void _setupSessionListener() {
+    _apiService.onSessionExpired = () {
+      if (mounted) {
+        showSessionExpiredDialog(context);
+      }
+    };
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _apiService.onSessionExpired = null;
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _loadScans();
+    if (state == AppLifecycleState.resumed) {
+      if (_apiService.session != null) {
+        _refreshOnResume();
+      } else {
+        showSessionExpiredDialog(context);
+      }
+    }
+  }
+
+  Future<void> _refreshOnResume() async {
+    // Verificar expiración local primero
+    if (_apiService.isSessionExpiredLocal) {
+      showSessionExpiredDialog(context);
+      return;
+    }
+
+    // Trigger el refresh igual (como si el usuario hiciera pull-to-refresh)
+    // Esto causará que se muestren los datos y si hay error 401, se detectará
+    await _loadScans();
+  }
+
+  Future<void> _validateSessionOnResume() async {
+    if (_apiService.session == null) {
+      showSessionExpiredDialog(context);
+      return;
+    }
+
+    final isValid = await _apiService.validateSessionSimple();
+    if (!isValid && _apiService.session == null) {
+      if (mounted) showSessionExpiredDialog(context);
+    }
   }
 
   Future<void> _loadScans() async {
-    await _apiService.restoreSession();
     setState(() => _isLoading = true);
 
     final result = await _apiService.getMisVisitasHoy();
+
+    if (result['session_expired'] == true) {
+      if (mounted) {
+        showSessionExpiredDialog(context);
+      }
+      return;
+    }
 
     if (result['success'] == true) {
       final contadores = result['contadores'] as Map<String, dynamic>? ?? {};

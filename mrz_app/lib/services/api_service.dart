@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -57,15 +58,20 @@ class OrganizacionData {
 class ApiService {
   static final ApiService _instance = ApiService._internal();
   factory ApiService() => _instance;
-  
+
   ApiService._internal();
-  
+
   String get baseUrl => AppConfig.apiBaseUrl;
   String get scanUrl => AppConfig.apiBaseUrl;
   String get loginUrl => AppConfig.loginUrl;
   String get registerUrl => AppConfig.registerUrl;
-  
+
+  static const int MAX_SESSION_MINUTES = 470; // 7 horas 50 min (backup local)
+
   SessionData? _session;
+  DateTime? _loginTime;
+
+  VoidCallback? onSessionExpired;
 
   SessionData? get session => _session;
   int get usuarioId => _session?.usuarioId ?? 0;
@@ -74,6 +80,136 @@ class ApiService {
   List<OrganizacionData> get organizaciones => _session?.organizaciones ?? [];
 
   bool get isLoggedIn => _session != null;
+
+  bool get isSessionExpiredLocal {
+    if (_loginTime == null) return true;
+    final now = DateTime.now();
+    final diff = now.difference(_loginTime!).inMinutes;
+    return diff >= MAX_SESSION_MINUTES;
+  }
+
+  Future<void> saveLoginTime() async {
+    _loginTime = DateTime.now();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('login_timestamp', _loginTime!.millisecondsSinceEpoch);
+  }
+
+  Future<void> loadLoginTime() async {
+    final prefs = await SharedPreferences.getInstance();
+    final timestamp = prefs.getInt('login_timestamp');
+    if (timestamp != null) {
+      _loginTime = DateTime.fromMillisecondsSinceEpoch(timestamp);
+    }
+  }
+
+  Future<bool> validateSession({bool triggerCallback = true}) async {
+    if (_session == null) return false;
+
+    // Primero: verificar expiración local
+    if (isSessionExpiredLocal) {
+      print('[ApiService] Sesión expirada localmente (${MAX_SESSION_MINUTES} min)');
+      await _handleSessionExpired(triggerCallback: triggerCallback);
+      return false;
+    }
+
+    try {
+      final response = await http.get(
+        Uri.parse('$registerUrl/verificar-acceso/$_session!.usuarioId'),
+        headers: {
+          'Authorization': 'Bearer ${_session!.accessToken}',
+        },
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        return true;
+      }
+
+      if (response.statusCode == 401) {
+        print('[ApiService] Token expirado o inválido (servidor)');
+        await _handleSessionExpired(triggerCallback: triggerCallback);
+        return false;
+      }
+
+      // Error del servidor pero no 401 - permitir por ahora
+      return true;
+    } catch (e) {
+      print('[ApiService] validateSession error: $e');
+      // Si hay error de conexión, permitir retry (no expirar localmente aún)
+      return true;
+    }
+  }
+
+  Future<bool> validateSessionSimple() async {
+    // Sin callback, solo para verificaciones background
+    if (_session == null) return false;
+
+    if (isSessionExpiredLocal) {
+      await _handleSessionExpiredLocal();
+      return false;
+    }
+
+    try {
+      final response = await http.get(
+        Uri.parse('$registerUrl/verificar-acceso/$_session!.usuarioId'),
+        headers: {
+          'Authorization': 'Bearer ${_session!.accessToken}',
+        },
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) return true;
+      if (response.statusCode == 401) {
+        await _handleSessionExpiredLocal();
+        return false;
+      }
+      return true;
+    } catch (e) {
+      return true;
+    }
+  }
+
+  Future<void> _handleSessionExpiredLocal() async {
+    _session = null;
+    _loginTime = null;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('session_token');
+      await prefs.remove('session_uid');
+      await prefs.remove('session_org_id');
+      await prefs.remove('session_crypto');
+      await prefs.remove('login_timestamp');
+    } catch (_) {}
+
+    if (onSessionExpired != null) {
+      onSessionExpired!();
+    }
+  }
+
+  Future<void> _handleSessionExpired({bool triggerCallback = true}) async {
+    _session = null;
+    _loginTime = null;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('session_token');
+      await prefs.remove('session_uid');
+      await prefs.remove('session_org_id');
+      await prefs.remove('session_crypto');
+      await prefs.remove('login_timestamp');
+    } catch (_) {}
+
+    if (triggerCallback && onSessionExpired != null) {
+      onSessionExpired!();
+    }
+  }
+
+  Future<dynamic> _handleResponse(http.Response response) async {
+    if (response.statusCode == 401) {
+      print('[ApiService] Error 401 - Sesión expirada');
+      await _handleSessionExpired(triggerCallback: false);
+      return {'success': false, 'session_expired': true, 'message': 'Sesión expirada'};
+    }
+    
+    return null;
+  }
 
   Future<void> restoreSession() async {
     try {
@@ -92,6 +228,7 @@ class ApiService {
           cryptoKey: crypto ?? '',
         );
         print('[ApiService] Sesión restaurada: uid=$uid, org=$orgId');
+        await loadLoginTime();
       }
     } catch (e) {
       print('[ApiService] Error restaurando sesión: $e');
@@ -114,16 +251,32 @@ class ApiService {
 
   Future<void> clearSession() async {
     _session = null;
+    _loginTime = null;
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('session_token');
       await prefs.remove('session_uid');
       await prefs.remove('session_org_id');
       await prefs.remove('session_crypto');
+      await prefs.remove('login_timestamp');
       print('[ApiService] Sesión limpiada');
     } catch (e) {
       print('[ApiService] Error limpiando sesión: $e');
     }
+  }
+
+  Future<bool> checkSessionBeforeOperation() async {
+    // Verifica si la sesión es válida ANTES de una operación crítica (como escanear)
+    if (_session == null) return false;
+
+    // Verificar expiración local
+    if (isSessionExpiredLocal) {
+      print('[ApiService] Sesión expirada localmente antes de operación');
+      await _handleSessionExpiredLocal();
+      return false;
+    }
+
+    return true;
   }
 
   Future<dynamic> login(String email, String password) async {
@@ -156,6 +309,7 @@ class ApiService {
 
           print('[ApiService] Sesión guardada. Token: ${_session!.accessToken.substring(0, 20)}...');
           await persistSession();
+          await saveLoginTime();
 
           return {
             'success': true,
@@ -200,7 +354,10 @@ class ApiService {
         const Duration(seconds: 30),
       );
 
-final response = await http.Response.fromStream(streamedResponse);
+      final response = await http.Response.fromStream(streamedResponse);
+
+      final sessionError = await _handleResponse(response);
+      if (sessionError != null) return sessionError;
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -245,6 +402,9 @@ final response = await http.Response.fromStream(streamedResponse);
           'usuario_id': usuarioId,
         }),
       ).timeout(const Duration(seconds: 30));
+
+      final sessionError = await _handleResponse(response);
+      if (sessionError != null) return {...sessionError, 'is_blacklist': false};
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -306,6 +466,9 @@ final response = await http.Response.fromStream(streamedResponse);
         body: bodyJson,
       ).timeout(const Duration(seconds: 30));
 
+      final sessionError = await _handleResponse(response);
+      if (sessionError != null) return sessionError;
+
       print('DEBUG registrarVisita - Status: ${response.statusCode}');
       print('DEBUG registrarVisita - Response: ${response.body}');
 
@@ -338,11 +501,18 @@ final response = await http.Response.fromStream(streamedResponse);
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         if (data['iv'] != null && data['data'] != null) {
-          // Por ahora retorna vacío, falta decrypt
           return [];
         }
+        
+        final sessionError = await _handleResponse(response);
+        if (sessionError != null) return [];
+        
         return [];
       }
+      
+      final sessionError = await _handleResponse(response);
+      if (sessionError != null) return [];
+      
       return [];
     } catch (e) {
       return [];
@@ -362,14 +532,25 @@ final response = await http.Response.fromStream(streamedResponse);
 
       if (response.statusCode == 200) {
         print('[ApiService] getMisVisitasHoy Response: ${response.body}');
+        
+        final sessionError = await _handleResponse(response);
+        if (sessionError != null) {
+          return {'success': false, ...sessionError, 'contadores': {'total_hoy': 0, 'dentro_edificio': 0, 'salieron_hoy': 0}, 'visitas': []};
+        }
+        
         final data = jsonDecode(response.body);
         print('[ApiService] getMisVisitasHoy Data: $data');
         print('[ApiService] contadores: ${data['contadores']}');
         print('[ApiService] visitas: ${data['visitas']}');
         return {'success': true, ...data};
-        return {'success': false, 'contadores': {'total_hoy': 0, 'dentro_edificio': 0, 'salieron_hoy': 0}, 'visitas': []};
       }
       print('[ApiService] getMisVisitasHoy Status: ${response.statusCode}');
+      
+      final sessionError = await _handleResponse(response);
+      if (sessionError != null) {
+        return {'success': false, ...sessionError, 'contadores': {'total_hoy': 0, 'dentro_edificio': 0, 'salieron_hoy': 0}, 'visitas': []};
+      }
+      
       return {'success': false, 'contadores': {'total_hoy': 0, 'dentro_edificio': 0, 'salieron_hoy': 0}, 'visitas': []};
     } catch (e) {
       return {'success': false, 'contadores': {'total_hoy': 0, 'dentro_edificio': 0, 'salieron_hoy': 0}, 'visitas': []};
@@ -399,9 +580,16 @@ final response = await http.Response.fromStream(streamedResponse);
       ).timeout(const Duration(seconds: 30));
 
       if (response.statusCode == 200) {
+        final sessionError = await _handleResponse(response);
+        if (sessionError != null) return false;
+
         final data = jsonDecode(response.body);
         return data['status'] == 'success';
       }
+      
+      final sessionError = await _handleResponse(response);
+      if (sessionError != null) return false;
+      
       return false;
     } catch (e) {
       return false;
@@ -445,6 +633,9 @@ final response = await http.Response.fromStream(streamedResponse);
       ).timeout(const Duration(seconds: 30));
 
       print('[ApiService] getDestinos - status: ${response.statusCode}');
+
+      final sessionError = await _handleResponse(response);
+      if (sessionError != null) return [];
 
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);

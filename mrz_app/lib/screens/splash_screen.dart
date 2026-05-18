@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'dart:math' as math;
 import '../services/storage_service.dart';
 import '../services/api_service.dart';
+import '../widgets/session_expired_dialog.dart';
 import 'login_screen.dart';
 import 'home_screen.dart';
 
@@ -62,11 +63,32 @@ class _SplashScreenState extends State<SplashScreen>
     );
 
     _logoController.forward();
+    _setupSessionListener();
     _checkUser();
   }
 
+  void _setupSessionListener() {
+    final apiService = ApiService();
+    apiService.onSessionExpired = () {
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          PageRouteBuilder(
+            pageBuilder: (context, animation, secondaryAnimation) =>
+                const LoginScreen(),
+            transitionsBuilder:
+                (context, animation, secondaryAnimation, child) {
+              return FadeTransition(opacity: animation, child: child);
+            },
+            transitionDuration: const Duration(milliseconds: 500),
+          ),
+        );
+      }
+    };
+  }
+
   Future<void> _checkUser() async {
-    await Future.delayed(const Duration(seconds: 2));
+    await Future.delayed(const Duration(milliseconds: 1500));
     if (!mounted) return;
 
     final storage = StorageService();
@@ -78,18 +100,45 @@ class _SplashScreenState extends State<SplashScreen>
     if (!mounted) return;
 
     if (user != null && apiService.isLoggedIn) {
-      Navigator.pushReplacement(
-        context,
-        PageRouteBuilder(
-          pageBuilder: (context, animation, secondaryAnimation) =>
-              HomeScreen(user: user),
-          transitionsBuilder:
-              (context, animation, secondaryAnimation, child) {
-            return FadeTransition(opacity: animation, child: child);
+      final isValid = await apiService.validateSession();
+
+      if (!mounted) return;
+
+      if (isValid) {
+        Navigator.pushReplacement(
+          context,
+          PageRouteBuilder(
+            pageBuilder: (context, animation, secondaryAnimation) =>
+                HomeScreen(user: user),
+            transitionsBuilder:
+                (context, animation, secondaryAnimation, child) {
+              return FadeTransition(opacity: animation, child: child);
+            },
+            transitionDuration: const Duration(milliseconds: 500),
+          ),
+        );
+      } else {
+        if (!mounted) return;
+        showSessionExpiredDialog(
+          context,
+          onDismiss: () {
+            if (mounted) {
+              Navigator.pushReplacement(
+                context,
+                PageRouteBuilder(
+                  pageBuilder: (context, animation, secondaryAnimation) =>
+                      const LoginScreen(),
+                  transitionsBuilder:
+                      (context, animation, secondaryAnimation, child) {
+                    return FadeTransition(opacity: animation, child: child);
+                  },
+                  transitionDuration: const Duration(milliseconds: 500),
+                ),
+              );
+            }
           },
-          transitionDuration: const Duration(milliseconds: 500),
-        ),
-      );
+        );
+      }
     } else {
       Navigator.pushReplacement(
         context,
@@ -111,6 +160,7 @@ class _SplashScreenState extends State<SplashScreen>
     _logoController.dispose();
     _bgController.dispose();
     _shimmerController.dispose();
+    ApiService().onSessionExpired = null;
     super.dispose();
   }
 
