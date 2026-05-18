@@ -124,7 +124,12 @@ class _ResultModalState extends State<ResultModal>
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+      padding: EdgeInsets.only(
+        left: 24,
+        right: 24,
+        top: 16,
+        bottom: 16 + MediaQuery.of(context).padding.bottom,
+      ),
       decoration: const BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.only(
@@ -162,13 +167,7 @@ class _ResultModalState extends State<ResultModal>
                   children: [
                     _buildInputField(label: 'Nombre Completo *', controller: _nombreCompletoController, icon: Icons.person_rounded),
                     const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(child: _buildInputField(label: 'RUT *', controller: _rutController, icon: Icons.badge_rounded)),
-                        const SizedBox(width: 12),
-                        Expanded(child: _buildInputField(label: 'N° Serie *', controller: _carnetController, icon: Icons.pin_rounded)),
-                      ],
-                    ),
+                    _buildInputField(label: 'RUT *', controller: _rutController, icon: Icons.badge_rounded),
                     const SizedBox(height: 12),
                     if (_cargandoDestinos)
                       const LinearProgressIndicator()

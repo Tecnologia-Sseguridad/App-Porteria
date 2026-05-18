@@ -23,6 +23,7 @@ class _ScannerScreenState extends State<ScannerScreen>
   bool _isProcessing = false;
   bool _isAnalyzing = false;
   double _analysisProgress = 0;
+  String _progressText = '';
   late AnimationController _pulseController;
 
   @override
@@ -98,20 +99,21 @@ class _ScannerScreenState extends State<ScannerScreen>
     setState(() {
       _isProcessing = true;
       _isAnalyzing = true;
-      _analysisProgress = 0.1;
+      _analysisProgress = 0;
+      _progressText = 'Preparando...';
     });
 
-    final animationTimer = Timer.periodic(const Duration(milliseconds: 50), (timer) {
-      if (!_isAnalyzing) {
-        timer.cancel();
-        return;
-      }
-      setState(() {
-        _analysisProgress = (_analysisProgress + 0.02).clamp(0.1, 0.95);
-      });
-    });
-
-    final result = await apiService.scanMRZ(_selectedImage!);
+    final result = await apiService.scanMRZ(
+      _selectedImage!,
+      onProgress: (progress, text) {
+        if (mounted) {
+          setState(() {
+            _analysisProgress = progress;
+            _progressText = text;
+          });
+        }
+      },
+    );
 
     if (!mounted) return;
 
@@ -143,6 +145,11 @@ class _ScannerScreenState extends State<ScannerScreen>
         destino: '',
       );
       
+      setState(() {
+        _analysisProgress = 1.0;
+        _progressText = 'Verificando blacklist...';
+      });
+
       final blacklistCheck = await apiService.checkBlacklist(
         rut: scanResult.rut,
         usuarioId: apiService.usuarioId,
@@ -156,7 +163,10 @@ class _ScannerScreenState extends State<ScannerScreen>
         return;
       }
 
-      setState(() => _isProcessing = false);
+      setState(() {
+        _isProcessing = false;
+        _progressText = 'Completado';
+      });
 
       if (blacklistCheck['is_blacklist'] == true) {
         _showBlacklistAlert(scanResult, blacklistCheck['motivo'] ?? 'En lista negra');
@@ -353,16 +363,54 @@ class _ScannerScreenState extends State<ScannerScreen>
             Container(
               color: Colors.black87,
               child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const CircularProgressIndicator(color: Colors.white),
-                    const SizedBox(height: 24),
-                    Text(
-                      _isAnalyzing ? 'PROCESANDO CARNET...' : 'GUARDANDO...',
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                    ),
-                  ],
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 40),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      SizedBox(
+                        width: 80,
+                        height: 80,
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            CircularProgressIndicator(
+                              value: _analysisProgress > 0 ? _analysisProgress : null,
+                              strokeWidth: 6,
+                              backgroundColor: Colors.white24,
+                              valueColor: const AlwaysStoppedAnimation<Color>(
+                                Color(0xFF00E676),
+                              ),
+                            ),
+                            if (_analysisProgress > 0)
+                              Text(
+                                '${(_analysisProgress * 100).toInt()}%',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      Text(
+                        _progressText.isNotEmpty ? _progressText : 'PROCESANDO...',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      const Text(
+                        'Por favor espera',
+                        style: TextStyle(color: Colors.white70, fontSize: 14),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),

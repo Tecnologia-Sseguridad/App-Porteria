@@ -328,13 +328,15 @@ class ApiService {
     }
   }
 
-  Future<dynamic> scanMRZ(File imageFile) async {
+  Future<dynamic> scanMRZ(File imageFile, {Function(double, String)? onProgress}) async {
     print('[ApiService] scanMRZ - Session: ${_session != null}');
     print('[ApiService] scanMRZ - UsuarioId: ${_session?.usuarioId}');
     
     if (_session == null) return {'success': false, 'message': 'Sesión no iniciada'};
 
     try {
+      onProgress?.call(0.1, 'Preparando imagen...');
+
       var request = http.MultipartRequest(
         'POST',
         Uri.parse('$scanUrl/api/scan'),
@@ -350,9 +352,13 @@ class ApiService {
 
       request.headers['Authorization'] = 'Bearer ${_session!.accessToken}';
 
+      onProgress?.call(0.3, 'Enviando al servidor...');
+
       final streamedResponse = await request.send().timeout(
         const Duration(seconds: 30),
       );
+
+      onProgress?.call(0.6, 'Procesando datos...');
 
       final response = await http.Response.fromStream(streamedResponse);
 
@@ -360,10 +366,12 @@ class ApiService {
       if (sessionError != null) return sessionError;
 
       if (response.statusCode == 200) {
+        onProgress?.call(0.85, 'Analizando resultado...');
         final data = jsonDecode(response.body);
         print('[ApiService] scanMRZ - Respuesta: $data');
         
         if (data['success'] == true) {
+          onProgress?.call(1.0, 'Completado');
           final mrzData = data['data'] ?? {};
           
           final nombreCompleto = '${mrzData['nombres'] ?? ''} ${mrzData['apellidos'] ?? ''}'.trim();
