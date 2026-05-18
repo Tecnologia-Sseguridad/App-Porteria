@@ -169,9 +169,13 @@ class _HomeScreenState extends State<HomeScreen>
       appBar: AppBar(
         title: const Text('CONTROL DE ACCESO'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.logout_rounded, color: Color(0xFF1E293B)),
+          TextButton.icon(
             onPressed: _logout,
+            icon: const Icon(Icons.logout_rounded, color: Color(0xFF1E293B), size: 20),
+            label: const Text(
+              'Cerrar sesión',
+              style: TextStyle(color: Color(0xFF1E293B), fontSize: 14, fontWeight: FontWeight.w600),
+            ),
           ),
         ],
       ),

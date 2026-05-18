@@ -115,32 +115,68 @@ class _VisitaDetalleScreenState extends State<VisitaDetalleScreen> {
   Future<void> _eliminarRegistro() async {
     if (_visita.id == null) return;
 
-    final confirm = await showDialog<bool>(
+    final TextEditingController motivoController = TextEditingController();
+    final motivo = await showDialog<String>(
       context: context,
+      barrierDismissible: false,
       builder: (context) => AlertDialog(
         backgroundColor: Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        title: const Text('¿Eliminar registro?', style: TextStyle(fontWeight: FontWeight.bold)),
-        content: const Text('Esta acción borrará permanentemente el registro de la visita.'),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_rounded, color: Color(0xFFEF4444)),
+            SizedBox(width: 12),
+            Text('Eliminar Registro', style: TextStyle(fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Ingrese el motivo de la eliminación:',
+              style: TextStyle(color: Color(0xFF64748B)),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: motivoController,
+              decoration: InputDecoration(
+                hintText: 'Ej: Cliente se fue sin registrarse',
+                filled: true,
+                fillColor: const Color(0xFFF8FAFC),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+              maxLines: 2,
+            ),
+          ],
+        ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => Navigator.pop(context, null),
             child: const Text('CANCELAR', style: TextStyle(color: Color(0xFF94A3B8))),
           ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('ELIMINAR', style: TextStyle(color: Color(0xFFEF4444), fontWeight: FontWeight.bold)),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, motivoController.text),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFEF4444),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            child: const Text('ELIMINAR'),
           ),
         ],
       ),
     );
 
-    if (confirm != true || _visita.id == null) return;
+    if (motivo == null || motivo.isEmpty) return;
 
     setState(() => _isLoading = true);
 
     try {
-      final response = await _apiService.eliminarVisita(_visita.id!);
+      final response = await _apiService.eliminarVisita(_visita.id!, motivo: motivo);
       if (response['success'] == true && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

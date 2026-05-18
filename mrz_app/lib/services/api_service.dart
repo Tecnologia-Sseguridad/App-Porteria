@@ -596,12 +596,13 @@ class ApiService {
     }
   }
 
-  Future<Map<String, dynamic>> eliminarVisita(int visitaId) async {
+  Future<Map<String, dynamic>> eliminarVisita(int visitaId, {String? motivo}) async {
     if (_session == null) return {'success': false, 'message': 'Sesión no iniciada'};
 
     try {
+      final uri = Uri.parse('$registerUrl/lecturas/$visitaId${motivo != null ? '?motivo=$motivo' : ''}');
       final response = await http.delete(
-        Uri.parse('$registerUrl/lecturas/$visitaId'),
+        uri,
         headers: {
           'Authorization': 'Bearer ${_session!.accessToken}',
         },
